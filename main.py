@@ -506,7 +506,7 @@ def main():
                 print("[检测] 沙包! 图像(%d,%d) 像素:%d  位置(%.1f,%.1f)" %
                       (cx, cy, px, ax, ay))
                 cmd_x, cmd_y = _push_to_edge(
-                    uart, state, ax, ay, offset_wx=-OFFSET_CM, offset_wy=0)
+                    uart, state, ax, ay, offset_wx=0, offset_wy=-OFFSET_CM)
                 # 后退10cm
                 send_move_delta(uart, -OFFSET_CM, 0, 40)
                 _wait_frames(450)
