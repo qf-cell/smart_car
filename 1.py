@@ -23,7 +23,7 @@ import gc
 
 from uart_comm import (init_uart, send_rotate, send_move_to,
                        send_move_delta, send_set_position,
-                       send_speed, read_position,
+                       send_speed, query_position, read_position,
                        send_push,
                        UART_PORT, UART_BAUD)
 
@@ -40,16 +40,16 @@ from bear_recognition import find_bear, init_bear
 FIELD_WIDTH = 320    # 场地宽度 (横向)
 FIELD_HEIGHT = 240   # 场地长度 (纵向)
 
-# # ── 信标世界坐标 ──
-# # 格式: AprilTag ID → (world_x_cm, world_y_cm)
+# ── 信标世界坐标 ──
+# 格式: AprilTag ID → (world_x_cm, world_y_cm)
 
-# BEACON_WORLD_POSITIONS = {
-#     0: (110, 240),   # 信标 0 位于左上方，x轴坐标与物品放置区start_x相同
-#     1: (210, 240),    # 信标 1 位于右上方，x轴坐标与物品放置区end_x相同
-# }
+BEACON_WORLD_POSITIONS = {
+    0: (110, 240),   # 信标 0 位于左上方，x轴坐标与物品放置区start_x相同
+    1: (210, 240),    # 信标 1 位于右上方，x轴坐标与物品放置区end_x相同
+}
 
-# # ── 信标 AprilTag 物理尺寸 (米) ──
-# BEACON_TAG_SIZE_M = 0.12  # 12cm 标签
+# ── 信标 AprilTag 物理尺寸 (米) ──
+BEACON_TAG_SIZE_M = 0.12  # 12cm 标签
 
 # ── 相机内参 (QQVGA 160x120, 轻量化) ──
 # 基于 OpenMV 镜头: 焦距 2.8mm, 感光元件 3.984mm x 2.952mm
@@ -125,46 +125,46 @@ def _detect_bear(img):
     return None
 
 
-# # =============================================================
-# #  信标 PnP 重定位
-# # =============================================================
+# =============================================================
+#  信标 PnP 重定位
+# =============================================================
 
-# def localize_from_beacon(img, state, uart):
-#     """PnP 重定位, 更新 state 并同步下位机"""
-#     tags = img.find_apriltags(fx=CAM_FX, fy=CAM_FY, cx=CAM_CX, cy=CAM_CY,
-#                               tagsize=BEACON_TAG_SIZE_M)
-#     for tag in tags:
-#         tag_id = tag.id()
-#         if tag_id not in BEACON_WORLD_POSITIONS:
-#             continue
+def localize_from_beacon(img, state, uart):
+    """PnP 重定位, 更新 state 并同步下位机"""
+    tags = img.find_apriltags(fx=CAM_FX, fy=CAM_FY, cx=CAM_CX, cy=CAM_CY,
+                              tagsize=BEACON_TAG_SIZE_M)
+    for tag in tags:
+        tag_id = tag.id()
+        if tag_id not in BEACON_WORLD_POSITIONS:
+            continue
 
-#         beacon_wx, beacon_wy = BEACON_WORLD_POSITIONS[tag_id]
+        beacon_wx, beacon_wy = BEACON_WORLD_POSITIONS[tag_id]
 
-#         tx_cm = tag.x_translation() * 100
-#         tz_cm = tag.z_translation() * 100
-#         heading = state.heading
+        tx_cm = tag.x_translation() * 100
+        tz_cm = tag.z_translation() * 100
+        heading = state.heading
 
-#         if heading == 0:
-#             wdx, wdy = tx_cm, tz_cm
-#         elif heading == -90:
-#             wdx, wdy = tz_cm, -tx_cm
-#         elif heading == 180:
-#             wdx, wdy = -tx_cm, -tz_cm
-#         elif heading == 90:
-#             wdx, wdy = -tz_cm, tx_cm
-#         else:
-#             continue
+        if heading == 0:
+            wdx, wdy = tx_cm, tz_cm
+        elif heading == -90:
+            wdx, wdy = tz_cm, -tx_cm
+        elif heading == 180:
+            wdx, wdy = -tx_cm, -tz_cm
+        elif heading == 90:
+            wdx, wdy = -tz_cm, tx_cm
+        else:
+            continue
 
-#         rx = int(beacon_wx - wdx)
-#         ry = int(beacon_wy - wdy)
-#         rx = max(0, min(FIELD_WIDTH, rx))
-#         ry = max(0, min(FIELD_HEIGHT, ry))
+        rx = int(beacon_wx - wdx)
+        ry = int(beacon_wy - wdy)
+        rx = max(0, min(FIELD_WIDTH, rx))
+        ry = max(0, min(FIELD_HEIGHT, ry))
 
-#         state.set_position(rx, ry)
-#         send_set_position(uart, rx, ry)
-#         print("[信标] PnP 重定位! Tag#%d → (%d, %d)" % (tag_id, rx, ry))
-#         return True
-#     return False
+        state.set_position(rx, ry)
+        send_set_position(uart, rx, ry)
+        print("[信标] PnP 重定位! Tag#%d → (%d, %d)" % (tag_id, rx, ry))
+        return True
+    return False
 
 
 # =============================================================
@@ -175,7 +175,7 @@ def _wait_frames(ms):
     time.sleep_ms(ms)
 
 
-def wait_reported_position(uart, state=None, timeout_ms = 800,label="下位机"):
+def wait_reported_position(uart, state=None, timeout_ms=300, label="下位机"):
     """等待下位机主动回传 @P#x#y!, 返回厘米坐标或 None。"""
     pos = read_position(uart, timeout_ms)
     if pos is None:
@@ -231,7 +231,7 @@ def scan_until_centered(uart, target_x, target_y, detect_fn,
                 _wait_frames(500)   # 等 ~500ms 让机器人停稳
 
                 # 查询下位机实际位置
-                pos = read_position(uart)
+                pos = query_position(uart)
                 if pos is not None:
                     ax, ay = pos
                     print("[扫描] 下位机位置: (%.1f, %.1f)" % (ax, ay))
@@ -314,7 +314,7 @@ def scan_bear_direct(uart, target_x, target_y, timeout=SCAN_TIMEOUT_FRAMES):
                 _wait_frames(500)   # 等 ~500ms 让机器人停稳
 
                 # 和普通扫描一样, 居中急停后查询下位机实际位置
-                pos = read_position(uart)
+                pos = query_position(uart)
                 if pos is not None:
                     ax, ay = pos
                     print("[小熊扫描] 下位机位置: (%.1f, %.1f)" % (ax, ay))
@@ -382,7 +382,7 @@ def _push_bear_to_left_edge(uart, cur_x, cur_y, offset_y=OFFSET_CM):
         _wait_frames(500)
         cur_y += offset_y
 
-        pos = read_position(uart)
+        pos = query_position(uart)
         if pos is not None:
             cur_x, cur_y = pos
             print("[小熊偏移] 偏移后下位机位置 (%.1f, %.1f)" %
@@ -437,14 +437,14 @@ def main():
     print("UART 初始化完成 (端口%d, %d bps)" % (UART_PORT, UART_BAUD))
 
     # ── 3. 初始化小车状态 ──
-    state = RobotState(start_x=42.5, start_y=-7.5)
+    state = RobotState(start_x=40, start_y=-12)
     _wait_frames(1000)
-    send_set_position(uart, 42.5, -7.5)
+    send_set_position(uart, 40, -12)
     wait_reported_position(uart, state, 500, "初始坐标同步")
 
     # ── 4. 三步核心扫描循环 ──
     step = 1
-    cmd_x, cmd_y = 42.5, -7.5   # 当前命令坐标
+    cmd_x, cmd_y = 40, -12   # 当前命令坐标
 
     # ── 物体剩余个数 ──
     tennis_count = TENNIS_TOTAL
@@ -476,10 +476,8 @@ def main():
 
             # 前往扫描起点
             print("[指令] 前往扫描起点 (110, 70)")
-            send_move_to(uart, 42.5, 70)
-            _wait_frames(1600)
             send_move_to(uart, 110, 70)
-            _wait_frames(1400)
+            _wait_frames(3000)
             cmd_x, cmd_y = 110, 70
             pos = wait_reported_position(uart, state, 500, "到扫描起点")
             if pos is not None:
@@ -495,6 +493,7 @@ def main():
                 img.draw_cross(cx, cy, color=(0, 255, 0))
                 cmd_x, cmd_y = _push_to_edge(
                     uart, state, ax, ay, offset_wx=OFFSET_CM, offset_wy=0)
+                # send_push(uart)
                 _wait_frames(500)
                 tennis_count -= 1
                 print("[计数] 网球剩余: %d" % tennis_count)
@@ -540,6 +539,7 @@ def main():
                       (cx, cy, px, ax, ay))
                 cmd_x, cmd_y = _push_to_edge(
                     uart, state, ax, ay, offset_wx=0, offset_wy=-OFFSET_CM)
+                # send_push(uart)
                 _wait_frames(500)
                 # 后退10cm
                 send_move_delta(uart, -OFFSET_CM, 0, 50)
@@ -573,7 +573,7 @@ def main():
                     send_move_delta(uart, OFFSET_CM, 0, 50)
                     _wait_frames(450)
 
-                    pos = read_position(uart, 500)
+                    pos = query_position(uart)
                     if pos is not None:
                         cur_x, cur_y = pos
                         print("[沙包补扫] 偏移后下位机位置 (%.1f, %.1f)" %
@@ -587,7 +587,7 @@ def main():
                     send_move_to(uart, cur_x, 170)
                     _wait_frames(600)
 
-                    pos = read_position(uart, 500)
+                    pos = read_position(uart, 3500) or query_position(uart)
                     if pos is not None:
                         cur_x, cur_y = pos
                         print("[沙包补扫] 到Y=170后下位机位置 (%.1f, %.1f)" %
@@ -603,7 +603,7 @@ def main():
                     print("[状态] 朝向: %d°" % state.heading)
 
                     print("[沙包补扫] 推至右边界 X=320")
-                    send_push(uart)
+                    #send_push(uart)
                     _wait_frames(3000)
                     # 后退10cm
                     send_move_delta(uart, -OFFSET_CM, 0, 50)
@@ -673,12 +673,12 @@ def main():
                           (cx, cy, px, ax, ay))
                     cmd_x, cmd_y = _push_to_edge(
                     uart, state, ax, ay, offset_wx=0, offset_wy=OFFSET_CM)
+                    # send_push(uart)
                     _wait_frames(4500)
                     bear_count -= 1
                     print("[计数] 小熊剩余: %d" % bear_count)
                 else:
                     print("[检测] 沿Y轴未找到小熊, 回到X扫描起点 (210,170) 继续沿X找小熊")
-                    gc.collect()
                     send_move_to(uart, 210, 170)
                     _wait_frames(1000)
                     cmd_x, cmd_y = 210, 170
@@ -703,7 +703,7 @@ def main():
                         send_move_delta(uart, -OFFSET_CM, 0, 50)
                         _wait_frames(450)
 
-                        pos = read_position(uart, 500)
+                        pos = query_position(uart)
                         if pos is not None:
                             cur_x, cur_y = pos
                             print("[小熊补扫] 偏移后下位机位置 (%.1f, %.1f)" %
@@ -717,7 +717,7 @@ def main():
                         send_move_to(uart, cur_x, 70)
                         _wait_frames(600)
 
-                        pos = read_position(uart, 500)
+                        pos = read_position(uart, 3500) or query_position(uart)
                         if pos is not None:
                             cur_x, cur_y = pos
                             print("[小熊补扫] 到Y=70后下位机位置 (%.1f, %.1f)" %
@@ -753,10 +753,10 @@ def main():
             # ── 核心扫描循环结束, 检查计数 ──
             if tennis_count == 0 and earthbag_count == 0 and bear_count == 0:
                 print("[计数] 所有物体已清空 → 返回起点")
-                print("[循环] 返回起点 (15, -10)")
-                send_move_to(uart, 15, -10)
+                print("[循环] 返回起点 (25, -25)")
+                send_move_to(uart, 25, -25)
                 _wait_frames(3000)
-                cmd_x, cmd_y = 15, -10
+                cmd_x, cmd_y = 25, -25
                 pos = wait_reported_position(uart, state, 500, "返回起点")
                 if pos is not None:
                     cmd_x, cmd_y = pos

@@ -130,16 +130,3 @@ def read_position(uart, timeout_ms=800):
         time.sleep_ms(10)
     return None
 
-
-def query_position(uart, timeout_ms=800):
-    """
-    查询下位机当前坐标 → 发送 @G!, 读取响应 @P#x#y!
-    返回 (x_cm, y_cm) 或 None (超时/解析失败)
-    """
-    uart.write("@G!\n")
-    pos = read_position(uart, timeout_ms)
-    if pos is not None:
-        return pos
-
-    print("[UART] 查询超时 %dms" % timeout_ms)
-    return None
