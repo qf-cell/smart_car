@@ -23,7 +23,7 @@ import gc
 
 from uart_comm import (init_uart, send_rotate, send_move_to,
                        send_move_delta, send_set_position,
-                       send_speed, query_position,
+                       send_speed, query_position, read_position,
                        send_push,
                        UART_PORT, UART_BAUD)
 
@@ -173,6 +173,20 @@ def localize_from_beacon(img, state, uart):
 
 def _wait_frames(ms):
     time.sleep_ms(ms)
+
+
+def wait_reported_position(uart, state=None, timeout_ms=1200, label="下位机"):
+    """等待下位机主动回传 @P#x#y!, 返回厘米坐标或 None。"""
+    pos = read_position(uart, timeout_ms)
+    if pos is None:
+        print("[%s] 未收到 @P#x#y! 回传" % label)
+        return None
+
+    x, y = pos
+    if state is not None:
+        state.set_position(x, y)
+    print("[%s] 回传位置: (%.1f, %.1f)" % (label, x, y))
+    return pos
 
 
 def is_centered(cx, img_w):
@@ -336,17 +350,21 @@ def _push_to_edge(uart, state, cur_x, cur_y,
 
     # ── 步骤2: 推至边缘 ──
     if h == 0:
-        send_push(uart, 0, 50)
+        send_push(uart)
     elif h == -90:
-        send_push(uart, -90, 50)
+        send_push(uart)
     elif h == 90:
-        send_push(uart, 90, 50)
+        send_push(uart)
     else:
         print("[推送] ⚠ 非法朝向 %d°, 不能推送!" % h)
         return cur_x, cur_y
 
     print("[推送] 沿 %d° 直线推至边缘" % (h))
     _wait_frames(4000)
+    pos = read_position(uart, 500)
+    if pos is not None:
+        cur_x, cur_y = pos
+        print("[推送] 下位机回传位置 (%.1f, %.1f)" % (cur_x, cur_y))
     return cur_x, cur_y
 
 
@@ -375,8 +393,12 @@ def _push_bear_to_left_edge(uart, cur_x, cur_y, offset_y=OFFSET_CM):
 
     ex, ey = 0, cur_y
     print("[小熊推送] 推至左边界 X=0")
-    send_push(uart, -90, 50)
+    send_push(uart)
     _wait_frames(4500)
+    pos = read_position(uart, 500)
+    if pos is not None:
+        ex, ey = pos
+        print("[小熊推送] 下位机回传位置 (%.1f, %.1f)" % (ex, ey))
     return ex, ey
 
 
@@ -418,6 +440,7 @@ def main():
     state = RobotState(start_x=40, start_y=-12)
     _wait_frames(1000)
     send_set_position(uart, 40, -12)
+    wait_reported_position(uart, state, 500, "初始坐标同步")
 
     # ── 4. 三步核心扫描循环 ──
     step = 1
@@ -456,6 +479,9 @@ def main():
             send_move_to(uart, 110, 70)
             _wait_frames(3000)
             cmd_x, cmd_y = 110, 70
+            pos = wait_reported_position(uart, state, 500, "到扫描起点")
+            if pos is not None:
+                cmd_x, cmd_y = pos
 
             # 连续扫描: 从当前点到 (210, 70)
             cx, cy, px, ax, ay, img = scan_until_centered(
@@ -465,7 +491,9 @@ def main():
                 print("[检测] 网球! 图像(%d,%d) 像素:%d  位置(%.1f,%.1f)" %
                       (cx, cy, px, ax, ay))
                 img.draw_cross(cx, cy, color=(0, 255, 0))
-                send_push(uart, 0, 50)
+                cmd_x, cmd_y = _push_to_edge(
+                    uart, state, ax, ay, offset_wx=OFFSET_CM, offset_wy=0)
+                send_push(uart)
                 _wait_frames(4500)
                 tennis_count -= 1
                 print("[计数] 网球剩余: %d" % tennis_count)
@@ -491,6 +519,9 @@ def main():
             send_move_to(uart, cmd_x, 170)
             _wait_frames(100)
             cmd_x, cmd_y = cmd_x, 170
+            pos = wait_reported_position(uart, state, 500, "到Y=170")
+            if pos is not None:
+                cmd_x, cmd_y = pos
 
             # 切换灰度模式
             sensor.reset()
@@ -506,7 +537,9 @@ def main():
             if cx is not None:
                 print("[检测] 沙包! 图像(%d,%d) 像素:%d  位置(%.1f,%.1f)" %
                       (cx, cy, px, ax, ay))
-                send_push(uart, 90, 50)
+                cmd_x, cmd_y = _push_to_edge(
+                    uart, state, ax, ay, offset_wx=0, offset_wy=-OFFSET_CM)
+                send_push(uart)
                 _wait_frames(4500)
                 # 后退10cm
                 send_move_delta(uart, -OFFSET_CM, 0, 50)
@@ -520,6 +553,9 @@ def main():
                 send_move_to(uart, 110, 70)
                 _wait_frames(1500)
                 cmd_x, cmd_y = 110, 70
+                pos = wait_reported_position(uart, state, 500, "沙包补扫起点")
+                if pos is not None:
+                    cmd_x, cmd_y = pos
 
                 send_rotate(uart, 0)
                 _wait_frames(800)
@@ -551,7 +587,7 @@ def main():
                     send_move_to(uart, cur_x, 170)
                     _wait_frames(600)
 
-                    pos = query_position(uart)
+                    pos = read_position(uart, 500) or query_position(uart)
                     if pos is not None:
                         cur_x, cur_y = pos
                         print("[沙包补扫] 到Y=170后下位机位置 (%.1f, %.1f)" %
@@ -567,7 +603,7 @@ def main():
                     print("[状态] 朝向: %d°" % state.heading)
 
                     print("[沙包补扫] 推至右边界 X=320")
-                    send_push(uart, 90, 50)
+                    send_push(uart)
                     _wait_frames(3000)
                     # 后退10cm
                     send_move_delta(uart, -OFFSET_CM, 0, 50)
@@ -610,6 +646,9 @@ def main():
                 send_move_to(uart, 210, 70)
                 _wait_frames(2000)
                 cmd_x, cmd_y = 210, 70
+                pos = wait_reported_position(uart, state, 500, "小熊扫描起点")
+                if pos is not None:
+                    cmd_x, cmd_y = pos
 
                 # 熊模型用 QVGA。必须 sensor.reset(): 第2步用过 GRAYSCALE/QQVGA,
                 # 只靠 set_framesize 切回 QVGA 帧缓冲重建不干净, tf.detect 会死在
@@ -632,7 +671,9 @@ def main():
                 if cx is not None:
                     print("[检测] 小熊! 图像(%d,%d) 像素:%d  位置(%.1f,%.1f)" %
                           (cx, cy, px, ax, ay))
-                    send_push(uart, -90, 50)
+                    cmd_x, cmd_y = _push_to_edge(
+                    uart, state, ax, ay, offset_wx=0, offset_wy=OFFSET_CM)
+                    send_push(uart)
                     _wait_frames(4500)
                     bear_count -= 1
                     print("[计数] 小熊剩余: %d" % bear_count)
@@ -641,6 +682,9 @@ def main():
                     send_move_to(uart, 210, 170)
                     _wait_frames(1000)
                     cmd_x, cmd_y = 210, 170
+                    pos = wait_reported_position(uart, state, 500, "小熊补扫起点")
+                    if pos is not None:
+                        cmd_x, cmd_y = pos
 
                     send_rotate(uart, 180)
                     _wait_frames(800)
@@ -673,7 +717,7 @@ def main():
                         send_move_to(uart, cur_x, 70)
                         _wait_frames(600)
 
-                        pos = query_position(uart)
+                        pos = read_position(uart, 500) or query_position(uart)
                         if pos is not None:
                             cur_x, cur_y = pos
                             print("[小熊补扫] 到Y=70后下位机位置 (%.1f, %.1f)" %
@@ -689,7 +733,7 @@ def main():
                         print("[状态] 朝向: %d°" % state.heading)
 
                         print("[小熊补扫] 推至左边界 X=0")
-                        send_push(uart, -90, 50)
+                        send_push(uart)
                         _wait_frames(4500)
 
                         # 推到左边界后向后退10cm, 避免继续顶住边界。
@@ -713,6 +757,9 @@ def main():
                 send_move_to(uart, 25, -25)
                 _wait_frames(3000)
                 cmd_x, cmd_y = 25, -25
+                pos = wait_reported_position(uart, state, 500, "返回起点")
+                if pos is not None:
+                    cmd_x, cmd_y = pos
 
             else:
                 print("[计数] 剩余: 网球=%d 沙包=%d 小熊=%d → 下一轮核心扫描" %

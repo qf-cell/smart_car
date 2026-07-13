@@ -9,6 +9,9 @@
   @S#x#y!        → 设置当前坐标 (米, 重定位用)
   @G!            → 查询当前位置
 
+接收帧:
+  @P#x#y!        → 下位机当前位置 (米)
+
 内部单位: 厘米 → 发送时自动转换为米
 """
 
@@ -52,13 +55,13 @@ def send_move_to(uart, x_cm, y_cm, speed_m_s=50):
     uart.write("@P#%.2f#%.2f#%.2f!" %
                (_to_m(x_cm), _to_m(y_cm), _to_m(speed_m_s)))
     
-def send_push(uart, heading, speed_m_s=50):
+def send_push(uart):
     """
     推至边缘 → @Push!
     heading: 推送方向 (度)
     speed_m_s:   合速度 (米/秒), 默认 0.5 m/s
     """
-    uart.write("@Push#%.2f#%.2f!"%(heading, _to_m(speed_m_s)))
+    uart.write("@PUSH!")
 
 def send_move_delta(uart, dx_cm, dy_cm, speed_m_s=50):
     """
@@ -86,42 +89,57 @@ def send_speed(uart, vx, vy):
     uart.write("@V#%.2f#%.2f!\n" % (vx, vy))
 
 
-def query_position(uart, timeout_ms=800):
+def _parse_position_buf(buf):
+    """从缓冲区中解析最后一帧 @P#x#y!, 返回厘米坐标或 None。"""
+    pos = None
+    search_from = 0
+    while True:
+        at_idx = buf.find(b'@P#', search_from)
+        if at_idx < 0:
+            break
+        excl_idx = buf.find(b'!', at_idx)
+        if excl_idx < 0:
+            break
+
+        frame = buf[at_idx + 3:excl_idx]  # skip "@P#"
+        parts = frame.split(b'#')
+        if len(parts) >= 2:
+            try:
+                pos = (float(parts[0]) * 100, float(parts[1]) * 100)
+            except Exception as e:
+                print("[UART] 解析位置失败: %s frame=%s" % (e, frame))
+        search_from = excl_idx + 1
+    return pos
+
+
+def read_position(uart, timeout_ms=800):
     """
-    查询下位机当前坐标 → 发送 @G!, 读取响应 @P#x#y!
-    返回 (x_cm, y_cm) 或 None (超时/解析失败)
+    读取下位机主动回传的当前位置 @P#x#y!。
+    不发送 @G!, 返回 (x_cm, y_cm) 或 None (超时/解析失败)。
     """
     import time
-
-    # 清空接收缓冲区
-    flushed = 0
-    while uart.any():
-        uart.read(uart.any())
-        flushed += 1
-
-    uart.write("@G!\n")
 
     buf = b''
     deadline = time.ticks_add(time.ticks_ms(), timeout_ms)
     while time.ticks_diff(deadline, time.ticks_ms()) > 0:
         if uart.any():
             buf += uart.read(uart.any())
-            at_idx = buf.find(b'@P#')
-            if at_idx >= 0:
-                excl_idx = buf.find(b'!', at_idx)
-                if excl_idx > at_idx:
-                    frame = buf[at_idx + 3:excl_idx]  # skip "@P#"
-                    parts = frame.split(b'#')
-                    if len(parts) >= 2:
-                        try:
-                            x_cm = float(parts[0]) * 100
-                            y_cm = float(parts[1]) * 100
-                            return (x_cm, y_cm)
-                        except Exception as e:
-                            print("[UART] 解析失败: %s buf=%s" % (e, buf))
-                            return None
+            pos = _parse_position_buf(buf)
+            if pos is not None:
+                return pos
         time.sleep_ms(10)
+    return None
 
-    print("[UART] 查询超时 %dms flushed=%d buf=%s" %
-          (timeout_ms, flushed, buf[:80] if buf else b'(empty)'))
+
+def query_position(uart, timeout_ms=800):
+    """
+    查询下位机当前坐标 → 发送 @G!, 读取响应 @P#x#y!
+    返回 (x_cm, y_cm) 或 None (超时/解析失败)
+    """
+    uart.write("@G!\n")
+    pos = read_position(uart, timeout_ms)
+    if pos is not None:
+        return pos
+
+    print("[UART] 查询超时 %dms" % timeout_ms)
     return None
