@@ -24,6 +24,7 @@ import gc
 from uart_comm import (init_uart, send_rotate, send_move_to,
                        send_move_delta, send_set_position,
                        send_speed, query_position,
+                       send_push,
                        UART_PORT, UART_BAUD)
 
 BEAR_DEBUG_FRAMES = 10         # 小熊调试只跑少量帧, 避免日志过长
@@ -348,18 +349,18 @@ def _push_to_edge(uart, state, cur_x, cur_y,
 
     # ── 步骤2: 推至边缘 ──
     if h == 0:
-        ex, ey = cur_x, FIELD_HEIGHT
+        send_push(uart, 0)
     elif h == -90:
-        ex, ey = FIELD_WIDTH, cur_y
+        send_push(uart, -90)
     elif h == 90:
-        ex, ey = 0, cur_y
+        send_push(uart, 90)
     else:
-        ex, ey = cur_x, cur_y
+        print("[推送] ⚠ 非法朝向 %d°, 不能推送!" % h)
+        return cur_x, cur_y
 
-    print("[推送] 沿 %d° 直线推至边缘 (%d, %d)" % (h, ex, ey))
-    send_move_to(uart, ex, ey)
+    print("[推送] 沿 %d° 直线推至边缘" % (h))
     _wait_frames(300)
-    return ex, ey
+    return cur_x, cur_y
 
 
 def _push_bear_to_left_edge(uart, cur_x, cur_y, offset_y=OFFSET_CM):
@@ -386,8 +387,8 @@ def _push_bear_to_left_edge(uart, cur_x, cur_y, offset_y=OFFSET_CM):
                   (cur_x, cur_y))
 
     ex, ey = 0, cur_y
-    print("[小熊推送] 推至左边界 X=0 → (%d, %.1f)" % (ex, ey))
-    send_move_to(uart, ex, ey)
+    print("[小熊推送] 推至左边界")
+    send_push(uart, -90)
     _wait_frames(300)
     return ex, ey
 
@@ -477,8 +478,7 @@ def main():
                 print("[检测] 网球! 图像(%d,%d) 像素:%d  位置(%.1f,%.1f)" %
                       (cx, cy, px, ax, ay))
                 img.draw_cross(cx, cy, color=(0, 255, 0))
-                cmd_x, cmd_y = _push_to_edge(
-                    uart, state, ax, ay, offset_wx=OFFSET_CM, offset_wy=0)
+                send_push(uart, 0)
                 tennis_count -= 1
                 print("[计数] 网球剩余: %d" % tennis_count)
             else:
@@ -518,8 +518,7 @@ def main():
             if cx is not None:
                 print("[检测] 沙包! 图像(%d,%d) 像素:%d  位置(%.1f,%.1f)" %
                       (cx, cy, px, ax, ay))
-                cmd_x, cmd_y = _push_to_edge(
-                    uart, state, ax, ay, offset_wx=-OFFSET_CM, offset_wy=0)
+                send_push(uart, 90)
                 # 后退10cm
                 send_move_delta(uart, -OFFSET_CM, 0, 40)
                 _wait_frames(450)
@@ -575,7 +574,7 @@ def main():
                     print("[状态] 朝向: %d°" % state.heading)
 
                     print("[沙包补扫] 推至右边界 X=320")
-                    send_move_to(uart, FIELD_WIDTH, cur_y)
+                    send_push(uart, 90)
                     _wait_frames(300)
                     # 后退10cm
                     send_move_delta(uart, -OFFSET_CM, 0, 40)
@@ -638,8 +637,7 @@ def main():
                 if cx is not None:
                     print("[检测] 小熊! 图像(%d,%d) 像素:%d  位置(%.1f,%.1f)" %
                           (cx, cy, px, ax, ay))
-                    cmd_x, cmd_y = _push_bear_to_left_edge(
-                        uart, ax, ay, offset_y=OFFSET_CM - 5)
+                    send_push(uart, -90)
                     bear_count -= 1
                     print("[计数] 小熊剩余: %d" % bear_count)
                 else:

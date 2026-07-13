@@ -43,22 +43,31 @@ def send_rotate(uart, angle_deg):
     uart.write("@A#%.1f!\n" % angle_deg)
 
 
-def send_move_to(uart, x_cm, y_cm):
+def send_move_to(uart, x_cm, y_cm, speed_m_s=50):
     """
     移动到绝对坐标 → @P#x#y!
     x_cm, y_cm: 目标坐标 (厘米)
+    speed_m_s:   合速度 (米/秒), 默认 0.5 m/s
     """
-    uart.write("@P#%.2f#%.2f!\n" % (_to_m(x_cm), _to_m(y_cm)))
+    uart.write("@P#%.2f#%.2f#%.2f!" %
+               (_to_m(x_cm), _to_m(y_cm), _to_m(speed_m_s)))
+    
+def send_push(uart, heading, speed_m_s=50):
+    """
+    推至边缘 → @Push!
+    heading: 推送方向 (度)
+    speed_m_s:   合速度 (米/秒), 默认 0.5 m/s
+    """
+    uart.write("@Push#%.2f#%.2f!"%(heading, _to_m(speed_m_s)))
 
-
-def send_move_delta(uart, dx_cm, dy_cm, speed_cm_s=40):
+def send_move_delta(uart, dx_cm, dy_cm, speed_m_s=50):
     """
     相对位移 + 合速度 → @D#dx#dy#v!
     dx_cm, dy_cm: 位移量 (厘米)
-    speed_cm_s:   合速度 (厘米/秒), 默认 40 = 0.4 m/s
+    speed_m_s:   合速度 (米/秒), 默认 0.5 m/s
     """
-    uart.write("@D#%.2f#%.2f#%.2f!\n" %
-               (_to_m(dx_cm), _to_m(dy_cm), _to_m(speed_cm_s)))
+    uart.write("@D#%.2f#%.2f#%.2f!" %
+               (_to_m(dx_cm), _to_m(dy_cm), _to_m(speed_m_s)))
 
 
 def send_set_position(uart, x_cm, y_cm):

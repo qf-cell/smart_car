@@ -33,10 +33,7 @@ DWA（动态窗口法）是一种实时避障导航算法，核心思想是：
 import math
 import time
 
-try:
-    from machine import UART  # MicroPython 硬件 UART
-except ImportError:
-    UART = None  # 非 MicroPython 环境（如 PC 调试）下退化为 None
+from machine import UART  
 
 
 # ---- 默认串口配置 ----
@@ -65,8 +62,8 @@ class DWAConfig:
 
         # ---- 采样与预测参数 ----
         self.dt = 0.1                  # 轨迹模拟的时间步长 (秒)
-        self.predict_time = 1.8        # 预测总时长 (秒)，越长越"远视"
-        self.v_resolution = 3.0        # 线速度采样步长，越小越密
+        self.predict_time = 2,0        # 预测总时长 (秒)，越长越"远视"
+        self.v_resolution = 2.8       # 线速度采样步长，越小越密
         self.w_resolution = 0.18       # 角速度采样步长，越小越密
 
         # ---- 碰撞模型 ----
@@ -80,7 +77,7 @@ class DWAConfig:
         self.velocity_weight = 0.15   # 速度权重：尽快到达
 
         # ---- 终点到达判断 ----
-        self.goal_tolerance = 8.0     # 到达阈值（距离 ≤ 此值则认为到达）
+        self.goal_tolerance = 4.0     # 到达阈值（距离 ≤ 此值则认为到达）
         self.stop_v = 0.0             # 到达后输出的线速度
         self.stop_w = 0.0             # 到达后输出的角速度
 

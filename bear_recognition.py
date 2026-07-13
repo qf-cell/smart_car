@@ -24,7 +24,7 @@ import tf
 
 DATA_COLLECT = False
 MODEL_PATH = "bear_model.tflite"          # 模型文件路径 (闪存根目录或 /sd/ 下)
-SCORE_THRESHOLD = 0.10                     # 置信度阈值
+SCORE_THRESHOLD = 0.50                    # 置信度阈值
 
 # 数据集采集参数
 SAVE_DIR = "bear_dataset"
